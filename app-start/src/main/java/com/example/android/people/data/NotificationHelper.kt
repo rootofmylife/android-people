@@ -78,6 +78,44 @@ class NotificationHelper(private val context: Context) {
     @WorkerThread
     fun updateShortcuts(importantContact: Contact?) {
         // TODO 2: Create dynamic shortcuts.
+        var shortcuts = Contact.CONTACTS.map { contact ->
+            val icon = Icon.createWithAdaptiveBitmap(
+                context.resources.assets.open(contact.icon).use { input ->
+                    BitmapFactory.decodeStream(input)
+                }
+            )
+            ShortcutInfo.Builder(context, contact.shortcutId)
+                .setLocusId(LocusId(contact.shortcutId))
+                .setActivity(ComponentName(context, MainActivity::class.java))
+                .setShortLabel(contact.name)
+                .setIcon(icon)
+                .setLongLived(true)
+                .setCategories(setOf("com.example.android.bubbles.category.TEXT_SHARE_TARGET"))
+                .setIntent(
+                    Intent(context, MainActivity::class.java)
+                        .setAction(Intent.ACTION_VIEW)
+                        .setData(
+                            Uri.parse(
+                                "https://android.example.com/chat/${contact.id}"
+                            )
+                        )
+                )
+                .setPerson(
+                    Person.Builder()
+                        .setName(contact.name)
+                        .setIcon(icon)
+                        .build()
+                )
+                .build()
+        }
+        if (importantContact != null) {
+            shortcuts = shortcuts.sortedByDescending { it.id == importantContact.shortcutId }
+        }
+        val maxCount = shortcutManager.maxShortcutCountPerActivity
+        if (shortcuts.size > maxCount) {
+            shortcuts = shortcuts.take(maxCount)
+        }
+        shortcutManager.addDynamicShortcuts(shortcuts)
     }
 
     @WorkerThread
@@ -93,9 +131,36 @@ class NotificationHelper(private val context: Context) {
             // The user can turn off the bubble in system settings. In that case, this notification
             // is shown as a normal notification instead of a bubble. Make sure that this
             // notification works as a normal notification as well.
+            .setBubbleMetadata(
+                Notification.BubbleMetadata
+                    .Builder(
+                        PendingIntent.getActivity(
+                            context,
+                            REQUEST_BUBBLE,
+                            Intent(context, BubbleActivity::class.java)
+                                .setAction(Intent.ACTION_VIEW)
+                                .setData(contentUri),
+                            PendingIntent.FLAG_UPDATE_CURRENT
+                        ),
+                        icon
+                    )
+                    .setDesiredHeightResId(R.dimen.bubble_height)
+                    .apply {
+                        if (fromUser) {
+                            setAutoExpandBubble(true)
+                            setSuppressNotification(true)
+                        }
+                    }
+                    .build()
+            )
+            // TODO 5: Finish TODO 5
             .setContentTitle(chat.contact.name)
             .setSmallIcon(R.drawable.ic_message)
             // TODO 4: Associate the notification with a shortcut.
+            .setCategory(Notification.CATEGORY_MESSAGE)
+            .setShortcutId(chat.contact.shortcutId)
+            .setLocusId(LocusId(chat.contact.shortcutId))
+            // TODO 4: Finish TODO 4
             .addPerson(person)
             .setShowWhen(true)
             // The content Intent is used when the user clicks on the "Open Content" icon button on
@@ -132,6 +197,31 @@ class NotificationHelper(private val context: Context) {
                     .build()
             )
             // TODO 1: Use MessagingStyle.
+            .setStyle(
+                Notification.MessagingStyle(user)
+                    .apply {
+                        val lastId = chat.messages.last().id
+                        for (message in chat.messages) {
+                            val m = Notification.MessagingStyle.Message(
+                                message.text,
+                                message.timestamp,
+                                if (message.isIncoming) person else null
+                            ).apply {
+                                if (message.photoUri != null) {
+                                    setData(message.photoMimeType, message.photoUri)
+                                }
+                            }
+                            if (message.id < lastId) {
+                                addHistoricMessage(m)
+                            } else {
+                                addMessage(m)
+                            }
+                        }
+                    }
+                    .setGroupConversation(false)
+            )
+            .setWhen(chat.messages.last().timestamp)
+            // TODO 1: Finish TODO 1
             .setContentText(chat.messages.last().text)
             .setWhen(chat.messages.last().timestamp)
 
